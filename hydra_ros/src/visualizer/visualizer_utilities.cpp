@@ -41,6 +41,14 @@
 
 #include "hydra_ros/visualizer/colormap_utilities.h"
 
+#include <string>
+#include <cstdint>
+
+#include <map>
+#include <regex>
+
+
+
 namespace hydra {
 
 using dsg_utils::makeColorMsg;
@@ -452,7 +460,8 @@ Marker makeTextMarkerNoHeight(const std_msgs::Header& header,
                               const LayerConfig& config,
                               const SceneGraphNode& node,
                               const VisualizerConfig&,
-                              const std::string& ns) {
+                              const std::string& ns,
+                              const ros::NodeHandle& nh) {
   Marker marker;
   marker.header = header;
   marker.ns = ns;
@@ -460,9 +469,59 @@ Marker makeTextMarkerNoHeight(const std_msgs::Header& header,
   marker.type = Marker::TEXT_VIEW_FACING;
   marker.action = Marker::ADD;
   marker.lifetime = ros::Duration(0);
-  marker.text = node.attributes<SemanticNodeAttributes>().name;
+
+  // ! Changes
+  int semantic_label = node.attributes<SemanticNodeAttributes>().semantic_label;
+  std::string unique_id = node.attributes<SemanticNodeAttributes>().name;
+
+  // Use regex to extract the number inside "O(x)"
+  std::regex number_regex(R"(O\((\d+)\))");
+  std::smatch match;
+
+  if (std::regex_search(unique_id, match, number_regex) && match.size() > 1) {
+      unique_id = match[1].str();  // Extract only the number
+  } else {
+      ROS_WARN("Could not extract number from name: %s", unique_id.c_str());
+  }
+
+  // Retrieve label_names from ROS parameters
+  XmlRpc::XmlRpcValue label_names;
+  if (!nh.getParam("/label_names", label_names)) {
+      ROS_WARN("Could not retrieve label_names from ROS parameters.");
+  }
+
+  // Ensure label_names is an array
+  std::string label_text = "Unknown";
+  if (label_names.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+      for (int i = 0; i < label_names.size(); ++i) {
+          if (label_names[i].getType() == XmlRpc::XmlRpcValue::TypeStruct &&
+              label_names[i].hasMember("label") &&
+              label_names[i].hasMember("name")) {
+
+              int label_id = static_cast<int>(label_names[i]["label"]);
+              std::string name = static_cast<std::string>(label_names[i]["name"]);
+
+              if (label_id == semantic_label) {
+                  label_text = name;  // Store the label name
+                  break;
+              }
+          }
+      }
+  } else {
+      ROS_WARN("label_names is not formatted as an array in ROS parameters.");
+  }
+
+  // Construct the marker text
+  std::stringstream ss;
+  ss << label_text << "(" << unique_id << ")";
+
+  marker.text = ss.str();
+
   marker.scale.z = config.label_scale;
   marker.color = makeColorMsg(Color());
+
+  std::string param_key = "/semantic_labels/" + unique_id;
+  nh.setParam(param_key, label_text);
 
   fillPoseWithIdentity(marker.pose);
   tf2::convert(node.attributes().position, marker.pose.position);
