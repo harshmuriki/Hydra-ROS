@@ -122,7 +122,8 @@ visualization_msgs::Marker makeTextMarkerNoHeight(
     const LayerConfig& config,
     const SceneGraphNode& node,
     const VisualizerConfig& visualizer_config,
-    const std::string& ns);
+    const std::string& ns,
+    const ros::NodeHandle& nh);
 
 std::vector<visualization_msgs::Marker> makeEllipsoidMarkers(
     const std_msgs::Header& header,
